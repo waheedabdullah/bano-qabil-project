@@ -3,14 +3,27 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
+// Client config is public (restricted by Firebase Auth domains + Security Rules).
+// Env vars override these defaults when set (local .env or Vercel).
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  apiKey:
+    import.meta.env.VITE_FIREBASE_API_KEY ||
+    "AIzaSyBEJt0_dc7N_z4G7RkeyYmuMu4J3vVmM-o",
+  authDomain:
+    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ||
+    "ano-qabil-projec.firebaseapp.com",
+  projectId:
+    import.meta.env.VITE_FIREBASE_PROJECT_ID || "ano-qabil-projec",
+  storageBucket:
+    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ||
+    "ano-qabil-projec.firebasestorage.app",
+  messagingSenderId:
+    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "210703266391",
+  appId:
+    import.meta.env.VITE_FIREBASE_APP_ID ||
+    "1:210703266391:web:7cb760e12e5dccc2dce912",
+  measurementId:
+    import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-L12S5QNZJ0",
 };
 
 export const firebaseConfigured = Boolean(
@@ -20,15 +33,7 @@ export const firebaseConfigured = Boolean(
     firebaseConfig.appId
 );
 
-if (!firebaseConfigured) {
-  console.error(
-    "Firebase env vars missing. On Vercel add VITE_FIREBASE_* variables, then Redeploy."
-  );
-}
-
-const app = firebaseConfigured
-  ? initializeApp(firebaseConfig)
-  : null;
+const app = firebaseConfigured ? initializeApp(firebaseConfig) : null;
 
 export const auth = app ? getAuth(app) : null;
 export const db = app ? getFirestore(app) : null;
