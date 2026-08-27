@@ -6,7 +6,7 @@ import {
   onAuthStateChanged,
 } from "firebase/auth";
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "../firebase";
+import { auth, db, firebaseConfigured } from "../firebase";
 import { ensureDoctorDoc } from "../services/doctors";
 import { normalizeRole } from "../utils/roles";
 import { canDoctorLogin } from "../services/doctorSignup";
@@ -87,6 +87,11 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
+    if (!firebaseConfigured || !auth) {
+      setLoading(false);
+      return undefined;
+    }
+
     const unsub = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       try {
@@ -110,6 +115,22 @@ export function AuthProvider({ children }) {
     });
     return unsub;
   }, []);
+
+  if (!firebaseConfigured) {
+    return (
+      <div className="page-center" style={{ padding: 24, textAlign: "center" }}>
+        <h1>Firebase config missing</h1>
+        <p className="muted">
+          Vercel pe Environment Variables add karo, phir Redeploy karo.
+        </p>
+        <p className="muted">
+          Required: VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN,
+          VITE_FIREBASE_PROJECT_ID, VITE_FIREBASE_STORAGE_BUCKET,
+          VITE_FIREBASE_MESSAGING_SENDER_ID, VITE_FIREBASE_APP_ID
+        </p>
+      </div>
+    );
+  }
 
   return (
     <AuthContext.Provider

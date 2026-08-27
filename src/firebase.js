@@ -13,14 +13,32 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
-const app = initializeApp(firebaseConfig);
+export const firebaseConfigured = Boolean(
+  firebaseConfig.apiKey &&
+    firebaseConfig.authDomain &&
+    firebaseConfig.projectId &&
+    firebaseConfig.appId
+);
 
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
+if (!firebaseConfigured) {
+  console.error(
+    "Firebase env vars missing. On Vercel add VITE_FIREBASE_* variables, then Redeploy."
+  );
+}
+
+const app = firebaseConfigured
+  ? initializeApp(firebaseConfig)
+  : null;
+
+export const auth = app ? getAuth(app) : null;
+export const db = app ? getFirestore(app) : null;
+export const storage = app ? getStorage(app) : null;
 
 /** Secondary app so admin can create doctor accounts without logging out. */
 export function getSecondaryAuth() {
+  if (!firebaseConfigured) {
+    throw new Error("Firebase is not configured.");
+  }
   const existing = getApps().find((item) => item.name === "Secondary");
   const secondary = existing || initializeApp(firebaseConfig, "Secondary");
   return getAuth(secondary);
