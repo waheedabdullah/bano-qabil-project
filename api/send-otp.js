@@ -1,8 +1,19 @@
-import { parseOtpPayload, sendOtpMail } from "../server/sendOtpMail.js";
+import nodemailer from "nodemailer";
+
+export const config = {
+  runtime: "nodejs",
+  maxDuration: 15,
+};
+
+function clean(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^["']|["']$/g, "");
+}
 
 /**
  * Vercel serverless — POST /api/send-otp
- * Env: GMAIL_USER, GMAIL_APP_PASSWORD (Production + Preview)
+ * Env (Production/Preview runtime): GMAIL_USER, GMAIL_APP_PASSWORD
  */
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -12,27 +23,63 @@ export default async function handler(req, res) {
     return;
   }
 
-  const user = process.env.GMAIL_USER?.trim();
-  const pass = process.env.GMAIL_APP_PASSWORD?.trim();
+  const user = clean(process.env.GMAIL_USER);
+  const pass = clean(process.env.GMAIL_APP_PASSWORD);
+
   if (!user || !pass) {
-    res.status(503).json({ error: "EMAIL_NOT_CONFIGURED" });
+    const missing = [];
+    if (!user) missing.push("GMAIL_USER");
+    if (!pass) missing.push("GMAIL_APP_PASSWORD");
+    const relatedKeys = Object.keys(process.env).filter((key) =>
+      /gmail|mail|smtp/i.test(key)
+    );
+    res.status(503).json({
+      error: "EMAIL_NOT_CONFIGURED",
+      missing,
+      relatedKeys,
+      envCount: Object.keys(process.env).length,
+    });
     return;
   }
 
-  const parsed = parseOtpPayload(req.body || {});
-  if (!parsed.ok) {
-    res.status(400).json({ error: parsed.error });
+  let body = req.body;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body || "{}");
+    } catch {
+      body = {};
+    }
+  }
+  body = body || {};
+
+  const to = String(body.to || "").trim().toLowerCase();
+  const name = String(body.name || "Doctor").trim();
+  const otp = String(body.otp || "").trim();
+
+  if (!to || !/^\d{6}$/.test(otp)) {
+    res.status(400).json({ error: "INVALID_PAYLOAD" });
     return;
   }
 
   try {
-    await sendOtpMail({
-      user,
-      pass,
-      to: parsed.to,
-      name: parsed.name,
-      otp: parsed.otp,
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: { user, pass },
     });
+
+    await transporter.sendMail({
+      from: `"Al Shifa Clinic" <${user}>`,
+      to,
+      subject: "Al Shifa Clinic — verification code",
+      text: `Hello ${name},\n\nYour Al Shifa Clinic verification code is: ${otp}\n\nThis code expires in 10 minutes.\n\nIf you did not request this, ignore this email.`,
+      html: `
+        <p>Hello ${name},</p>
+        <p>Your <strong>Al Shifa Clinic</strong> verification code is:</p>
+        <p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:16px 0">${otp}</p>
+        <p>This code expires in 10 minutes.</p>
+      `,
+    });
+
     res.status(200).json({ sent: true });
   } catch (err) {
     console.error("OTP email failed:", err?.message || err);

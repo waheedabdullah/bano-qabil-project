@@ -22,6 +22,9 @@ export async function sendOtpEmail(toEmail, doctorName, otp) {
   if (res.status === 503 || data.error === "EMAIL_NOT_CONFIGURED") {
     const err = new Error("EMAIL_NOT_CONFIGURED");
     err.code = "EMAIL_NOT_CONFIGURED";
+    err.missing = data.missing;
+    err.relatedKeys = data.relatedKeys;
+    err.envCount = data.envCount;
     throw err;
   }
 

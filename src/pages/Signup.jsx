@@ -39,7 +39,10 @@ function doctorError(err) {
     return "Network error. Check your internet connection and try again.";
   }
   if (code === "EMAIL_NOT_CONFIGURED" || msg === "EMAIL_NOT_CONFIGURED") {
-    return "Email is not set up. Add GMAIL_USER and GMAIL_APP_PASSWORD in .env (local) or Vercel Environment Variables, then redeploy / restart.";
+    const missing = Array.isArray(err?.missing) ? err.missing.join(", ") : "";
+    return missing
+      ? `Email env missing on Vercel: ${missing}. Delete those variables, Add again with real values (not empty), then Redeploy.`
+      : "Email is not set up. On Vercel: delete GMAIL_USER + GMAIL_APP_PASSWORD, Add them again with real values, then Redeploy.";
   }
   if (code === "EMAIL_SEND_FAILED" || msg === "EMAIL_SEND_FAILED") {
     return "Could not send OTP email. Check Gmail App Password, spam folder, or .env values.";
