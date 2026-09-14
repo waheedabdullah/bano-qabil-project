@@ -28,7 +28,7 @@ function doctorError(err) {
     return "Name, valid email, and password (6+ chars) required.";
   }
   if (msg === "EMAIL_IN_USE" || code === "auth/email-already-in-use") {
-    return "This email is already registered.";
+    return "This email belongs to an existing account (or password does not match the previous signup). Use a different email, or delete the old Auth user + Firestore docs, then try again.";
   }
   if (code === "auth/invalid-email") return "Enter a valid email address.";
   if (code === "auth/weak-password") return "Password must be at least 6 characters.";
@@ -39,7 +39,7 @@ function doctorError(err) {
     return "Network error. Check your internet connection and try again.";
   }
   if (code === "EMAIL_NOT_CONFIGURED" || msg === "EMAIL_NOT_CONFIGURED") {
-    return "Email is not set up. Add GMAIL_USER and GMAIL_APP_PASSWORD in .env, then restart npm run dev.";
+    return "Email is not set up. Add GMAIL_USER and GMAIL_APP_PASSWORD in .env (local) or Vercel Environment Variables, then redeploy / restart.";
   }
   if (code === "EMAIL_SEND_FAILED" || msg === "EMAIL_SEND_FAILED") {
     return "Could not send OTP email. Check Gmail App Password, spam folder, or .env values.";
@@ -203,10 +203,13 @@ export default function Signup() {
     } catch (err) {
       const code = err?.code || "";
       const msg = err?.message || "";
+      // Only leave OTP step when Auth rejects the email (OTP was cleared).
       if (msg === "EMAIL_IN_USE" || code === "auth/email-already-in-use") {
         setStep("form");
         setOtp("");
+        setEmailTaken(true);
       }
+      // Other errors stay on OTP so user can resend / retry without losing the form.
       setError(doctorError(err));
     } finally {
       setSaving(false);

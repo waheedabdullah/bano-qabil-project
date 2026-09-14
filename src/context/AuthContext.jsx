@@ -33,7 +33,8 @@ export function AuthProvider({ children }) {
       return null;
     }
     const data = { ...snap.data(), role: normalizeRole(snap.data().role) };
-    if (data.role === "doctor") {
+    // Skip ensure for pending doctors — avoids racing doctor self-signup writes.
+    if (data.role === "doctor" && data.approvalStatus !== "pending") {
       await ensureDoctorDoc(uid, data);
     }
     setProfile(data);

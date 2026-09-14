@@ -13,7 +13,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { db, getSecondaryAuth, storage } from "../firebase";
+import { db, getSecondaryAuth, getSecondaryDb, storage } from "../firebase";
 import { defaultSchedule } from "../utils/slots";
 
 export function doctorDefaults(userData) {
@@ -57,6 +57,7 @@ export async function createDoctorAccount({
   phone = "",
 }) {
   const secondaryAuth = getSecondaryAuth();
+  const secondaryDb = getSecondaryDb();
   const cred = await createUserWithEmailAndPassword(
     secondaryAuth,
     email,
@@ -64,7 +65,7 @@ export async function createDoctorAccount({
   );
   const uid = cred.user.uid;
 
-  await setDoc(doc(db, "users", uid), {
+  await setDoc(doc(secondaryDb, "users", uid), {
     name,
     email,
     role: "doctor",
@@ -73,7 +74,7 @@ export async function createDoctorAccount({
   });
 
   await setDoc(
-    doc(db, "doctors", uid),
+    doc(secondaryDb, "doctors", uid),
     doctorDefaults({ name, email, phone, specialization })
   );
 

@@ -39,12 +39,24 @@ export const auth = app ? getAuth(app) : null;
 export const db = app ? getFirestore(app) : null;
 export const storage = app ? getStorage(app) : null;
 
-/** Secondary app so admin can create doctor accounts without logging out. */
-export function getSecondaryAuth() {
+/** Secondary Firebase app (own Auth + Firestore binding). */
+export function getSecondaryApp() {
   if (!firebaseConfigured) {
     throw new Error("Firebase is not configured.");
   }
   const existing = getApps().find((item) => item.name === "Secondary");
-  const secondary = existing || initializeApp(firebaseConfig, "Secondary");
-  return getAuth(secondary);
+  return existing || initializeApp(firebaseConfig, "Secondary");
+}
+
+/** Secondary Auth — create users without touching the primary session. */
+export function getSecondaryAuth() {
+  return getAuth(getSecondaryApp());
+}
+
+/**
+ * Firestore from the secondary app so request.auth matches secondary Auth.
+ * Primary `db` ignores secondary login and writes fail with permission-denied.
+ */
+export function getSecondaryDb() {
+  return getFirestore(getSecondaryApp());
 }

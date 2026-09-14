@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -10,9 +11,10 @@ import {
 import {
   createUserWithEmailAndPassword,
   fetchSignInMethodsForEmail,
+  signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import { auth, db } from "../firebase";
+import { auth, db, getSecondaryAuth, getSecondaryDb } from "../firebase";
 import { doctorDefaults } from "./doctors";
 import { sendOtpEmail } from "./email";
 
@@ -45,7 +47,26 @@ function emailInUseError() {
   return err;
 }
 
-/** Check Firestore + Auth before sending OTP (not after verify). */
+/** True when this email already belongs to a finished account (not pending doctor). */
+function blocksDoctorSignup(data, fromCollection) {
+  if (!data) return false;
+  if (fromCollection === "users") {
+    const role = String(data.role || "").toLowerCase();
+    if (role === "patient" || role === "admin") return true;
+    if (role === "doctor") {
+      const status = data.approvalStatus;
+      // Pending incomplete signup can be reclaimed after OTP.
+      if (status === "pending") return false;
+      return true;
+    }
+    return true;
+  }
+  const status = data.approvalStatus;
+  if (status === "pending") return false;
+  return true;
+}
+
+/** Check Firestore before sending OTP. Auth leftovers are reclaimed on verify. */
 async function assertEmailAvailable(email) {
   const normalized = email.trim().toLowerCase();
 
@@ -55,12 +76,20 @@ async function assertEmailAvailable(email) {
       getDocs(collection(db, "doctors")),
     ]);
 
-    const inUsers = usersSnap.docs.some(
-      (item) => String(item.data().email || "").toLowerCase() === normalized
-    );
-    const inDoctors = doctorsSnap.docs.some(
-      (item) => String(item.data().email || "").toLowerCase() === normalized
-    );
+    const inUsers = usersSnap.docs.some((item) => {
+      const data = item.data();
+      return (
+        String(data.email || "").toLowerCase() === normalized &&
+        blocksDoctorSignup(data, "users")
+      );
+    });
+    const inDoctors = doctorsSnap.docs.some((item) => {
+      const data = item.data();
+      return (
+        String(data.email || "").toLowerCase() === normalized &&
+        blocksDoctorSignup(data, "doctors")
+      );
+    });
     if (inUsers || inDoctors) {
       throw emailInUseError();
     }
@@ -78,17 +107,66 @@ async function assertEmailAvailable(email) {
     throw err;
   }
 
+  // Auth-only leftovers are OK — verify step signs in and finishes profiles.
   try {
-    const methods = await fetchSignInMethodsForEmail(auth, normalized);
-    if (methods.length > 0) {
-      throw emailInUseError();
-    }
-  } catch (err) {
-    if (err?.code === "auth/email-already-in-use" || err?.message === "EMAIL_IN_USE") {
-      throw err;
-    }
-    // Enumeration protection may hide Auth methods — Firestore check above is primary
+    await fetchSignInMethodsForEmail(auth, normalized);
+  } catch {
+    // ignore enumeration / network
   }
+}
+
+async function writePendingDoctorProfiles(uid, pending, details, email, firestore) {
+  await setDoc(doc(firestore, "users", uid), {
+    name: pending.name || details.name,
+    email,
+    role: "doctor",
+    phone: pending.phone || details.phone || "",
+    approvalStatus: "pending",
+    emailVerified: true,
+    createdAt: serverTimestamp(),
+  });
+
+  await setDoc(doc(firestore, "doctors", uid), {
+    ...doctorDefaults({
+      name: pending.name || details.name,
+      email,
+      phone: pending.phone || details.phone,
+      specialization: pending.specialization || details.specialization,
+      experience: pending.experience || details.experience,
+      bio: pending.bio || details.bio,
+      fee: pending.fee || details.fee,
+    }),
+    approvalStatus: "pending",
+    available: false,
+  });
+
+  // Remove orphan pending profiles left by earlier failed attempts.
+  const [usersSnap, doctorsSnap] = await Promise.all([
+    getDocs(collection(firestore, "users")),
+    getDocs(collection(firestore, "doctors")),
+  ]);
+  const removals = [];
+  for (const item of usersSnap.docs) {
+    if (item.id === uid) continue;
+    const data = item.data();
+    if (
+      String(data.email || "").toLowerCase() === email &&
+      data.approvalStatus === "pending"
+    ) {
+      removals.push(deleteDoc(item.ref));
+    }
+  }
+  for (const item of doctorsSnap.docs) {
+    if (item.id === uid) continue;
+    const data = item.data();
+    if (
+      String(data.email || "").toLowerCase() === email &&
+      data.approvalStatus === "pending"
+    ) {
+      removals.push(deleteDoc(item.ref));
+    }
+  }
+  if (removals.length) await Promise.all(removals);
 }
 
 /** Public helper — call from signup form when doctor types email. */
@@ -149,6 +227,8 @@ export async function sendDoctorSignupOtp(details) {
 
 /**
  * Step 2 — OTP correct → create Auth + Firestore account (pending admin).
+ * Uses secondary Auth so primary session / AuthContext never races with writes.
+ * If Auth already exists from a partial signup, sign in with the same password and finish profiles.
  */
 export async function completeDoctorSignupAfterOtp(details, otpInput) {
   const email = details.email.trim().toLowerCase();
@@ -165,59 +245,49 @@ export async function completeDoctorSignupAfterOtp(details, otpInput) {
     throw new Error("OTP_INVALID");
   }
 
-  try {
-    await assertEmailAvailable(email);
-  } catch (err) {
-    clearPendingOtp();
-    throw err;
-  }
-
+  const secondaryAuth = getSecondaryAuth();
+  const secondaryDb = getSecondaryDb();
   let cred;
   try {
     cred = await createUserWithEmailAndPassword(
-      auth,
+      secondaryAuth,
       email,
       details.password
     );
   } catch (err) {
-    clearPendingOtp();
-    throw err;
+    if (err?.code !== "auth/email-already-in-use") {
+      clearPendingOtp();
+      throw err;
+    }
+    // Partial signup leftover — reclaim if password matches.
+    try {
+      cred = await signInWithEmailAndPassword(
+        secondaryAuth,
+        email,
+        details.password
+      );
+    } catch {
+      clearPendingOtp();
+      throw emailInUseError();
+    }
   }
 
   const uid = cred.user.uid;
 
   try {
-    await setDoc(doc(db, "users", uid), {
-      name: pending.name || details.name,
-      email,
-      role: "doctor",
-      phone: pending.phone || details.phone || "",
-      approvalStatus: "pending",
-      emailVerified: true,
-      createdAt: serverTimestamp(),
-    });
-
-    await setDoc(doc(db, "doctors", uid), {
-      ...doctorDefaults({
-        name: pending.name || details.name,
-        email,
-        phone: pending.phone || details.phone,
-        specialization: pending.specialization || details.specialization,
-        experience: pending.experience || details.experience,
-        bio: pending.bio || details.bio,
-        fee: pending.fee || details.fee,
-      }),
-      approvalStatus: "pending",
-      available: false,
-    });
+    await writePendingDoctorProfiles(uid, pending, details, email, secondaryDb);
   } catch (err) {
     console.error("Doctor profile write failed:", err);
-    await signOut(auth);
+    try {
+      await signOut(secondaryAuth);
+    } catch {
+      // ignore
+    }
     throw err;
   }
 
   clearPendingOtp();
-  await signOut(auth);
+  await signOut(secondaryAuth);
 
   return { uid, email, name: pending.name || details.name };
 }

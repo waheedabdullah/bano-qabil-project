@@ -1,6 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
-import nodemailer from "nodemailer";
+import { parseOtpPayload, sendOtpMail } from "./server/sendOtpMail.js";
 
 function otpEmailApi() {
   return {
@@ -32,32 +32,19 @@ function otpEmailApi() {
 
           try {
             const body = JSON.parse(raw || "{}");
-            const to = String(body.to || "").trim().toLowerCase();
-            const name = String(body.name || "Doctor").trim();
-            const otp = String(body.otp || "").trim();
-
-            if (!to || !/^\d{6}$/.test(otp)) {
+            const parsed = parseOtpPayload(body);
+            if (!parsed.ok) {
               res.statusCode = 400;
-              res.end(JSON.stringify({ error: "INVALID_PAYLOAD" }));
+              res.end(JSON.stringify({ error: parsed.error }));
               return;
             }
 
-            const transporter = nodemailer.createTransport({
-              service: "gmail",
-              auth: { user, pass },
-            });
-
-            await transporter.sendMail({
-              from: `"Al Shifa Clinic" <${user}>`,
-              to,
-              subject: "Al Shifa Clinic — verification code",
-              text: `Hello ${name},\n\nYour Al Shifa Clinic verification code is: ${otp}\n\nThis code expires in 10 minutes.\n\nIf you did not request this, ignore this email.`,
-              html: `
-                <p>Hello ${name},</p>
-                <p>Your <strong>Al Shifa Clinic</strong> verification code is:</p>
-                <p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:16px 0">${otp}</p>
-                <p>This code expires in 10 minutes.</p>
-              `,
+            await sendOtpMail({
+              user,
+              pass,
+              to: parsed.to,
+              name: parsed.name,
+              otp: parsed.otp,
             });
 
             res.statusCode = 200;
@@ -81,9 +68,11 @@ function otpEmailApi() {
 export default defineConfig({
   plugins: [react(), otpEmailApi()],
   server: {
+    host: "127.0.0.1",
+    port: 5173,
+    strictPort: false,
     watch: {
-      usePolling: true,
-      ignored: ["**/node_modules/**", "**/.git/**"],
+      ignored: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
     },
   },
 });
